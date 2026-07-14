@@ -25,8 +25,8 @@ def _is_admin() -> bool:
 def _relaunch_as_admin() -> bool:
     """Re-run elevated (UAC) so LibreHardwareMonitor can read CPU temp.
     Returns True if the elevated instance launched, False if the user declined."""
-    args = " ".join(f'"{a}"' for a in sys.argv[1:])
-    params = f'"{__file__}" {args} --no-elevate'.replace("  ", " ").strip()
+    parts = [f'"{__file__}"'] + [f'"{a}"' for a in sys.argv[1:]] + ["--no-elevate"]
+    params = " ".join(parts)
     r = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
     return int(r) > 32
 

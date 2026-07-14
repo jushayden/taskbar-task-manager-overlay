@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+
+# LibreHardwareMonitor extracts its kernel driver here at runtime (elevated) — not source
+lib/*.sys

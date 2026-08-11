@@ -37,13 +37,31 @@ class Reading:
 
 
 class _Nvml:
-    """NVIDIA GPU util, VRAM and temperature via NVML."""
+    """NVIDIA GPU util, VRAM and temperature via NVML.
+
+    The handle is refreshed periodically: a long-lived NVML handle can start
+    returning a stale utilization value (e.g. stuck at a game's peak after it
+    exits) even though a fresh handle reads correctly, so we re-init on a timer
+    and whenever a read fails.
+    """
+
+    REINIT_EVERY = 120  # seconds between forced NVML re-inits
 
     def __init__(self):
         self.nv = None
         self.h = None
+        self._last_init = 0.0
+        self._reinit()
+
+    def _reinit(self) -> None:
+        self._last_init = time.monotonic()
         try:
             import pynvml
+            if self.nv is not None:
+                try:
+                    self.nv.nvmlShutdown()
+                except Exception:
+                    pass
             pynvml.nvmlInit()
             self.nv = pynvml
             self.h = pynvml.nvmlDeviceGetHandleByIndex(0)
@@ -52,13 +70,16 @@ class _Nvml:
             self.h = None
 
     def fill(self, r: Reading) -> None:
+        if self.h is None or (time.monotonic() - self._last_init) >= self.REINIT_EVERY:
+            self._reinit()
         if self.h is None:
             return
         nv = self.nv
         try:
             r.gpu = float(nv.nvmlDeviceGetUtilizationRates(self.h).gpu)
         except Exception:
-            pass
+            self.h = None  # broken handle -> re-init next cycle
+            return
         try:
             m = nv.nvmlDeviceGetMemoryInfo(self.h)
             r.vram_used = m.used / 1024 ** 3

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import threading
+import time
 from ctypes import wintypes
 
 import config
@@ -158,11 +160,20 @@ class StatsWidget(QWidget):
         self._shown = True
         self._hide_streak = 0
 
-        self._tick = QTimer(self); self._tick.timeout.connect(self._refresh)
+        # Collect stats on a background thread so a slow or stale sensor read can never
+        # stall the refresh loop (a wedged read was leaving the displayed values pinned).
+        try:
+            self._reading = self._collector.read()
+        except Exception:
+            pass
+        self._stop = threading.Event()
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+
+        self._tick = QTimer(self); self._tick.timeout.connect(self.update)
         self._tick.start(config.REFRESH_MS)
         self._pos = QTimer(self); self._pos.timeout.connect(self._reposition)
         self._pos.start(config.REPOSITION_MS)
-        self._refresh()
         self._reposition()
         # extra early passes: at login the taskbar is still settling and an embedded child can
         # stay unpainted until the shell repaints — re-assert placement + force a paint a few times.
@@ -175,12 +186,25 @@ class StatsWidget(QWidget):
         return f
 
     # -- data + placement --
-    def _refresh(self):
-        try:
-            self._reading = self._collector.read()
-        except Exception:
-            pass
-        self.update()
+    def _read_loop(self):
+        interval = max(0.2, config.REFRESH_MS / 1000.0)
+        recreate_every = 60.0
+        last_recreate = time.monotonic()
+        while not self._stop.is_set():
+            try:
+                self._reading = self._collector.read()
+            except Exception:
+                pass
+            # periodically rebuild the collector so a stale NVML/sensor handle can't pin values
+            if time.monotonic() - last_recreate >= recreate_every:
+                try:
+                    fresh = Collector()
+                    old, self._collector = self._collector, fresh
+                    old.close()
+                except Exception:
+                    pass
+                last_recreate = time.monotonic()
+            self._stop.wait(interval)
 
     def _embed(self, hwnd, taskbar):
         """Reparent into the taskbar so Win11 can't composite over us (topmost isn't enough)."""
@@ -367,6 +391,7 @@ class StatsWidget(QWidget):
         m.exec(e.globalPos())
 
     def _quit(self):
+        self._stop.set()
         try:
             self._collector.close()
         except Exception:

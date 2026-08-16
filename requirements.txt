@@ -1,4 +1,3 @@
 PySide6
 psutil
 nvidia-ml-py
-pythonnet

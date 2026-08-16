@@ -1,7 +1,6 @@
 """System stats collection.
 
 CPU/RAM -> psutil. GPU util / VRAM / GPU temp -> NVML (nvidia-ml-py).
-CPU temp -> LibreHardwareMonitor via pythonnet (needs admin to read the sensor).
 
 Every source degrades independently: if one isn't available its fields stay None
 and the widget renders '--' for them, so the app always runs.
@@ -11,13 +10,10 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import psutil
 
 import config
-
-_LIB = Path(__file__).resolve().parent / "lib"
 
 
 @dataclass
@@ -32,7 +28,6 @@ class Reading:
     gpu: float | None = None          # %
     vram_used: float | None = None    # GB
     vram_total: float | None = None   # GB
-    cpu_temp: float | None = None     # °C
     gpu_temp: float | None = None     # °C
 
 
@@ -99,63 +94,6 @@ class _Nvml:
             pass
 
 
-class _CpuTemp:
-    """CPU package temperature via LibreHardwareMonitorLib (.NET, pythonnet)."""
-
-    def __init__(self):
-        self.computer = None
-        self.HardwareType = None
-        self.SensorType = None
-        try:
-            from pythonnet import load
-            load("netfx")  # use .NET Framework 4.x (always present on Windows)
-            import clr
-            clr.AddReference(str(_LIB / "LibreHardwareMonitorLib.dll"))
-            from LibreHardwareMonitor.Hardware import Computer, HardwareType, SensorType
-            self.HardwareType = HardwareType
-            self.SensorType = SensorType
-            c = Computer()
-            c.IsCpuEnabled = True
-            c.Open()
-            self.computer = c
-        except Exception:
-            self.computer = None
-
-    def read(self) -> float | None:
-        if self.computer is None:
-            return None
-        try:
-            best = None
-            for hw in self.computer.Hardware:
-                if hw.HardwareType != self.HardwareType.Cpu:
-                    continue
-                hw.Update()
-                pkg, cores = None, []
-                for s in hw.Sensors:
-                    if s.SensorType != self.SensorType.Temperature or s.Value is None:
-                        continue
-                    name = s.Name or ""
-                    val = float(s.Value)
-                    if "Package" in name or "Tctl" in name or "Tdie" in name:
-                        pkg = val
-                    elif "Core" in name and "Max" not in name and "Average" not in name:
-                        cores.append(val)
-                if pkg is not None:
-                    best = pkg
-                elif cores:
-                    best = max(cores)
-            return best
-        except Exception:
-            return None
-
-    def close(self) -> None:
-        try:
-            if self.computer is not None:
-                self.computer.Close()
-        except Exception:
-            pass
-
-
 class Collector:
     def __init__(self):
         try:
@@ -163,7 +101,6 @@ class Collector:
         except Exception:
             pass
         self._nvml = _Nvml()
-        self._cpu_temp = _CpuTemp()
         self._last_disk = None  # (busy_ms, monotonic_time)
 
     def _disk(self) -> float | None:
@@ -212,12 +149,10 @@ class Collector:
         except Exception:
             pass
         self._nvml.fill(r)
-        r.cpu_temp = self._cpu_temp.read()
         return r
 
     def close(self) -> None:
         self._nvml.close()
-        self._cpu_temp.close()
 
 
 if __name__ == "__main__":  # quick manual check: python stats.py

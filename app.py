@@ -1,8 +1,7 @@
 """TaskbarStats — a compact always-on-top system monitor that snaps into the
-empty right side of the Windows 11 taskbar. CPU/RAM/GPU/VRAM + CPU/GPU temps.
+empty right side of the Windows 11 taskbar. CPU/RAM/DISK/STORE/GPU/VRAM + GPU temp.
 
-Run:  pythonw app.py         (self-elevates for CPU temp)
-      python  app.py --no-elevate   (skip the UAC relaunch; CPU temp may be blank)
+Run:  pythonw app.py
 """
 from __future__ import annotations
 
@@ -14,23 +13,6 @@ from ctypes import wintypes
 
 import config
 from stats import Collector, Reading
-
-
-# ---------------------------------------------------------------- admin elevate
-def _is_admin() -> bool:
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
-
-
-def _relaunch_as_admin() -> bool:
-    """Re-run elevated (UAC) so LibreHardwareMonitor can read CPU temp.
-    Returns True if the elevated instance launched, False if the user declined."""
-    parts = [f'"{__file__}"'] + [f'"{a}"' for a in sys.argv[1:]] + ["--no-elevate"]
-    params = " ".join(parts)
-    r = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-    return int(r) > 32
 
 
 # ---------------------------------------------------------------- win32 helpers
@@ -115,7 +97,7 @@ def _store_pct(r: Reading):
 # each cell: icon kind, value text, value color, optional temp, load% (for the meter), worst-case value
 CELLS = [
     dict(icon="cpu", title="CPU", value=lambda r: _pct(r.cpu), color=lambda r: _color_load(r.cpu),
-         temp=lambda r: r.cpu_temp, load=lambda r: r.cpu, worst="100%", has_temp=True),
+         temp=None, load=lambda r: r.cpu, worst="100%", has_temp=False),
     dict(icon="ram", title="RAM", value=lambda r: _pct(r.ram), color=lambda r: _color_load(r.ram),
          temp=None, load=lambda r: r.ram, worst="100%", has_temp=False),
     dict(icon="disk", title="DISK", value=lambda r: _pct(r.disk), color=lambda r: _color_load(r.disk),
@@ -400,10 +382,6 @@ class StatsWidget(QWidget):
 
 
 def main():
-    if "--no-elevate" not in sys.argv and not _is_admin():
-        if _relaunch_as_admin():
-            return  # handed off to the elevated instance
-        # UAC declined -> keep running non-elevated (all stats except CPU temp still work)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     w = StatsWidget()

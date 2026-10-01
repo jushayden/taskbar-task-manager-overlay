@@ -23,6 +23,8 @@ _user32.SetWindowLongW.restype = ctypes.c_long
 _user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
 _user32.SetParent.restype = wintypes.HWND
 _user32.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
+_user32.IsWindow.restype = wintypes.BOOL
+_user32.IsWindow.argtypes = [wintypes.HWND]
 
 
 def _rect(hwnd) -> wintypes.RECT | None:
@@ -200,6 +202,20 @@ class StatsWidget(QWidget):
         self._parent = taskbar
         self._embedded = True
 
+    def _recreate(self) -> int:
+        """Our window is a child of the taskbar, so the shell destroys it whenever it rebuilds
+        the taskbar (e.g. a fullscreen game launching). Recreate a fresh native window so the
+        next embed can re-attach it, instead of the widget staying gone until a manual relaunch."""
+        self._embedded = False
+        self._parent = None
+        try:
+            self.destroy(True, True)
+        except Exception:
+            pass
+        self.create()
+        self.show()
+        return int(self.winId())
+
     def _app_edge(self, tb, scan_right_screen):
         """Rightmost screen-x with an app icon, scanning ONLY the taskbar strip left of the
         widget (so it can never detect itself). Pixel-based because the classic MSTask* window
@@ -235,6 +251,8 @@ class StatsWidget(QWidget):
     def _reposition(self):
         try:
             hwnd = int(self.winId())
+            if not _user32.IsWindow(hwnd):
+                hwnd = self._recreate()   # taskbar was rebuilt and took our child window with it
             taskbar = _user32.FindWindowW("Shell_TrayWnd", None)
             if not taskbar:
                 return

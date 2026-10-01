@@ -103,30 +103,34 @@ class Collector:
         self._nvml = _Nvml()
         self._last_disk = None  # (busy_ms, monotonic_time)
 
-    def _disk(self) -> float | None:
-        if getattr(config, "DISK_MODE", "activity") == "space":
-            try:
-                return float(psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\").percent)
-            except Exception:
-                return None
-        # activity %: fraction of wall time the disk spent busy (approx, like Task Manager)
+    def _disk_space(self) -> float | None:
         try:
-            io = psutil.disk_io_counters()
-            if io is None:
-                return None
-            busy = getattr(io, "read_time", 0) + getattr(io, "write_time", 0)
-            now = time.monotonic()
-            if self._last_disk is None:
-                self._last_disk = (busy, now)
-                return 0.0
-            pb, pt = self._last_disk
-            self._last_disk = (busy, now)
-            dt = (now - pt) * 1000.0
-            if dt <= 0:
-                return None
-            return max(0.0, min(100.0, (busy - pb) / dt * 100.0))
+            return float(psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\").percent)
         except Exception:
             return None
+
+    def _disk(self) -> float | None:
+        if getattr(config, "DISK_MODE", "activity") == "space":
+            return self._disk_space()
+        # activity %: fraction of wall time the disk spent busy (approx, like Task Manager).
+        # Falls back to disk-space % when the I/O perf counters read empty — they can come
+        # back None in some elevated/session contexts, which was leaving the tile blank ("--").
+        try:
+            io = psutil.disk_io_counters()
+            if io is not None:
+                busy = getattr(io, "read_time", 0) + getattr(io, "write_time", 0)
+                now = time.monotonic()
+                if self._last_disk is None:
+                    self._last_disk = (busy, now)
+                    return 0.0
+                pb, pt = self._last_disk
+                self._last_disk = (busy, now)
+                dt = (now - pt) * 1000.0
+                if dt > 0:
+                    return max(0.0, min(100.0, (busy - pb) / dt * 100.0))
+        except Exception:
+            pass
+        return self._disk_space()
 
     def read(self) -> Reading:
         r = Reading()

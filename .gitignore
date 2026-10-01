@@ -4,3 +4,6 @@ __pycache__/
 
 # LibreHardwareMonitor extracts its kernel driver here at runtime (elevated) — not source
 lib/*.sys
+
+# leftover LibreHardwareMonitor DLL; CPU temp was removed in 8077619
+lib/
